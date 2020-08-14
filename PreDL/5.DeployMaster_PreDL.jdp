@@ -1,0 +1,49 @@
+pipeline {
+    agent any
+    environment {
+        report_receivers = "quang.tong quang.tong@vtijs.com"
+        predl_url = "https://pre-dl.dssvti.com"
+        RECIPIENTLIST = 'quang.tong@vtijs.com'
+        sonar_report = '/data/sonarqube/reports/hlc13/'
+        master_dir='/root/jenkins_master'
+        predl_app = '10.30.50.8'
+        predl_db = '10.30.50.100'
+    }
+    stages {
+        stage('Checkout Master') {
+            steps {
+                git([url: 'https://github.com/DSS-VTI/dss_hl_pre_pro', branch: 'master', credentialsId: '0fea8675-defc-4420-94f4-6b62e6b34e25'])
+            }
+        }
+        stage('Rsync Code To PreDL App') {
+            steps {
+                sh '''#!/bin/bash
+                ssh root@${predl_app} "rm -rf $staging_dir && mkdir -p $master_dir"
+                '''
+                sh '''#!/bin/bash
+                rsync -avz -r * --stats -e "ssh" root@${predl_app}:$master_dir/
+                '''
+            }
+        }
+        stage('Deploy PreDL App') {
+            steps {
+                echo 'Deploy App on master branch'
+            }
+        }
+        stage('Deploy PreDL DB') {
+            steps {
+                echo 'Deploy DB'
+            }
+        }
+        stage('Test') {
+            steps {
+                echo 'Test'
+            }
+        }
+    }
+    post {
+        always {
+            deleteDir()
+        }
+    }
+}

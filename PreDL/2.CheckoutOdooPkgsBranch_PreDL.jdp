@@ -1,0 +1,42 @@
+pipeline {
+    agent any
+    stages {
+        stage('Checkout Odoo Package branch') {
+            steps {
+                git([url: 'https://github.com/DSS-VTI/dss_hl_pre_pro', branch: 'odoo_packages', credentialsId: '0fea8675-defc-4420-94f4-6b62e6b34e25'])
+            }
+        }
+        stage('Rsync to Git Temp Dir') {
+            steps {
+               sh '''#!/bin/bash
+                mkdir -p /data/git_tmp/odoo_packages
+                cd $WORKSPACE; rsync -avz --stats -r * /data/git_tmp/odoo_packages/
+               '''
+            }
+        }
+        stage('Test') {
+            steps {
+                sh '''#!/bin/bash
+                if [ -d /data/git_tmp/odoo_packages ]; then
+                    cd /data/git_tmp/odoo_package
+                    count=`ls | wc -l`
+                    if test $count -eq 0; then
+                        exit 1
+                    fi
+                fi
+                exit 0
+                '''
+            }
+        }
+        stage('Push To Staging') {
+            steps {
+                build job: '2.1.PushToStaging_PreDL'
+            }
+        }
+    }
+    post {
+        always {
+            deleteDir()
+        }
+    }
+}

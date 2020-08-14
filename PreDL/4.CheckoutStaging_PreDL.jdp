@@ -1,0 +1,42 @@
+pipeline {
+    agent any
+    stages {
+        stage('Checkout Staging') {
+            steps {
+                git([url: 'https://github.com/DSS-VTI/dss_hl_pre_pro', branch: 'staging', credentialsId: '0fea8675-defc-4420-94f4-6b62e6b34e25'])
+            }
+        }
+        stage('Rsync To Git Temp Dir') {
+            steps {
+                sh '''#!/bin/bash
+                mkdir -p /data/git_tmp/dss_hl_pre_pro
+                cd $WORKSPACE; rsync -avz --stats -r * /data/git_tmp/dss_hl_pre_pro/
+               '''
+            }
+        }
+        stage('Test') {
+            steps {
+                sh '''#!/bin/bash
+                if [ -d /data/git_tmp/dss_hl_pre_pro ]; then
+                    cd /data/git_tmp/dss_hl_pre_pro
+                    count=`ls | wc -l`
+                    if test $count -eq 0; then
+                        exit 1
+                    fi
+                fi
+                exit 0
+                '''
+            }
+        }
+        stage('Push To Master') {
+            steps {
+                build job: '4.1.PushStagingToMaster_PreDL'
+            }
+        }
+    }
+    post {
+        always {
+            deleteDir()
+        }
+    }
+}

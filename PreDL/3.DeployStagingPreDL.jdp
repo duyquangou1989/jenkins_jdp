@@ -1,0 +1,65 @@
+pipeline {
+    agent any
+    environment {
+        report_receivers = "quang.tong quang.tong@vtijs.com"
+        predl_url = "https://pre-dl.dssvti.com"
+        RECIPIENTLIST = 'quang.tong@vtijs.com'
+        sonar_report = '/data/sonarqube/reports/hlc13/'
+        staging_dir='/root/jenkins_staging'
+        predl_app = '10.30.50.8'
+        predl_db = '10.30.50.100'
+    }
+    stages {
+        stage('Checkout Staging') {
+            steps {
+                git([url: 'https://github.com/DSS-VTI/dss_hl_pre_pro', branch: 'staging', credentialsId: '0fea8675-defc-4420-94f4-6b62e6b34e25'])
+            }
+        }
+        stage('Rsync Staging Code To Pre App') {
+            steps {
+                sh '''#!/bin/bash
+                ssh root@${predl_app} "rm -rf $staging_dir && mkdir -p $staging_dir"
+                '''
+                sh '''#!/bin/bash
+                rsync -avz -r * --stats -e "ssh" root@${predl_app}:$staging_dir/
+                '''
+            }
+        }
+        stage('Deploy PreDL App') {
+            steps {
+                sh 'ssh root@${predl_app} "bash /data/script/auto-staging.bash"'
+            }
+        }
+        stage('Deploy PreDL DB') {
+            steps {
+                echo 'Deploy DB'
+            }
+        }
+        stage('Test') {
+            steps {
+                sh '''#!/bin/bash
+                    stats=`curl -I -s -L "${predl_url}" | grep "HTTP"  | cut -d' ' -f2`
+                    if test $stats -ne 200; then 
+                        echo "Web App http status : $stats"
+                        exit 1; 
+                    else
+                        echo "Web App http status : $stats"
+                    fi
+                '''
+            }
+        }
+        stage('Prepare Staging To Master') {
+            steps {
+                build job: '4.CheckoutStaging_PreDL'
+            }
+        }
+    }
+    post {
+        always {
+            deleteDir()
+        }
+        success {
+            emailext(to: "$RECIPIENTLIST",subject: "Jenkins Build ${currentBuild.currentResult}: Job ${env.JOB_NAME}",body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}\n Pre Dl Url: ${predl_url}")
+        }
+    }
+}
