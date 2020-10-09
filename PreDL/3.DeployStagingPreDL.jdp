@@ -48,11 +48,6 @@ pipeline {
                 '''
             }
         }
-        stage('Prepare Staging To Master') {
-            steps {
-                build job: '4.CheckoutStaging_PreDL'
-            }
-        }
     }
     post {
         always {

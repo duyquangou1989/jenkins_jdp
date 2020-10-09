@@ -1,0 +1,211 @@
+pipeline {
+	agent any
+	environment {
+    	registry = "asia.gcr.io/vti-sandbox-mobile"
+    	dockerImage = ""
+    	namespace = "premx"
+    	redis_ip = "10.8.2.244"
+    	postgres_ip = "10.8.2.240"
+    	postgres_aftersale_ip = "10.8.2.241"
+    	RECIPIENTLIST = 'quang.tong@vtijs.com'
+    }
+	stages {
+		stage('Checkout') {
+			steps {
+				git([url: 'https://github.com/DSS-VTI/dss_pre_mx', branch: 'master', credentialsId: '0fea8675-defc-4420-94f4-6b62e6b34e25'])
+			}
+		}
+		stage('Build Image') {
+			steps {
+				sh '''#!/bin/bash
+				cd $WORKSPACE
+				for f in `ls docker`
+				do
+					name=`echo $f | cut -d'.' -f1`
+					docker build . -f docker/$f -t $registry/$name-mbe-prod:$BUILD_NUMBER
+				done
+				'''
+			}	
+		}
+		stage('Push Image') {
+			steps {
+				sh '''
+				cd $WORKSPACE
+				for f in `ls docker`
+				do
+					name=`echo $f | cut -d'.' -f1`
+					gcloud docker -- push $registry/$name-mbe-prod:$BUILD_NUMBER
+				done
+				'''
+			}
+		}
+		stage('Config') {
+			steps {
+				sh 'cd /data/scripts; bash mx.sh'
+			}
+		}
+		stage('Deploy') {
+			steps {
+				sh 'gcloud container clusters get-credentials hlc13-prepro --zone asia-southeast1-b --project vti-sandbox-mobile'
+				/*** Install Postgres ***/
+				sh '''#!/bin/bash
+				PATH=/usr/local/bin:$PATH
+    			existNS=`kubectl get namespace | grep $namespace | wc -l`
+    			if test $existNS -ne 1; then
+    				kubectl create namespace $namespace
+    			fi
+    			helm uninstall postgresql -n $namespace
+    			kubectl delete pvc/data-postgresql-postgresql-0 -n $namespace
+    			helm install postgresql --set postgresqlPassword=897wsMXvoTgo,postgresqlDatabase=oauth2server --set persistence.size=10Gi --set service.clusterIP=$postgres_ip --set metrics.enabled=true --namespace=$namespace bitnami/postgresql
+    			count=0
+    			while test $count -lt 300
+    			do
+    				postgresStatus=`kubectl get statefulset/postgresql-postgresql -n $namespace -o json | jq '.status.readyReplicas'`
+    				[[ $postgresStatus -gt 0 ]] && exit 0
+    				count=`expr $count + 1`
+    				sleep 1
+    			done
+    			exit 1
+				'''
+				sh '''#!/bin/bash
+				PATH=/usr/local/bin:$PATH
+				kubectl expose svc/postgresql -n $namespace --type=LoadBalancer --name=postgresql-tmp
+				count=0
+				while test $count -lt 300
+				do
+					ip=`kubectl get svc/postgresql-tmp -n $namespace -o json | jq '.status.loadBalancer.ingress[0].ip' | cut -d'"' -f2`
+					[[ $ip != "null" ]] && exit 0
+					count=`expr $count + 1`
+					sleep 1
+				done
+				exit 1
+				'''
+
+				/*** Install Postgres Aftersale ***/
+				sh '''#!/bin/bash
+				PATH=/usr/local/bin:$PATH
+    			existNS=`kubectl get namespace | grep $namespace | wc -l`
+    			if test $existNS -ne 1; then
+    				kubectl create namespace $namespace
+    			fi
+    			helm uninstall postgresql-aftersale -n $namespace
+    			kubectl delete pvc/data-postgresql-aftersale-postgresql-0 -n $namespace
+    			helm install postgresql-aftersale --set postgresqlPassword=897wsMXvoTgo,postgresqlDatabase=aftersale --set persistence.size=10Gi --set service.clusterIP=$postgres_aftersale_ip --set metrics.enabled=true --namespace=$namespace bitnami/postgresql
+    			count=0
+    			while test $count -lt 300
+    			do
+    				postgresStatus=`kubectl get statefulset/postgresql-aftersale-postgresql -n $namespace -o json | jq '.status.readyReplicas'`
+    				[[ $postgresStatus -gt 0 ]] && exit 0
+    				count=`expr $count + 1`
+    				sleep 1
+    			done
+    			exit 1
+				'''
+				sh '''#!/bin/bash
+				PATH=/usr/local/bin:$PATH
+				kubectl expose svc/postgresql-aftersale -n $namespace --type=LoadBalancer --name=postgresql-aftersale-tmp
+				count=0
+				while test $count -lt 300
+				do
+					ip=`kubectl get svc/postgresql-aftersale-tmp -n $namespace -o json | jq '.status.loadBalancer.ingress[0].ip' | cut -d'"' -f2`
+					[[ $ip != "null" ]] && exit 0
+					count=`expr $count + 1`
+					sleep 1
+				done
+				exit 1
+				'''
+
+				sh '''#!/bin/bash
+				PATH=/usr/local/bin:$PATH
+				ip=`kubectl get svc/postgresql-aftersale-tmp -n $namespace -o json | jq '.status.loadBalancer.ingress[0].ip' | cut -d'"' -f2`
+				if [ -f /data/scripts/aftersale.sql ]
+				then
+					cd /data/scripts;PGPASSWORD=897wsMXvoTgo psql -U postgres -h $ip aftersale < aftersale.sql
+				fi
+				'''
+
+				sh '''#!/bin/bash
+				PATH=/usr/local/bin:$PATH
+				ip=`kubectl get svc/postgresql-tmp -n $namespace -o json | jq '.status.loadBalancer.ingress[0].ip' | cut -d'"' -f2`
+				if [ -f /data/scripts/oauth2server.schema ]
+				then
+					cd /data/scripts;PGPASSWORD=897wsMXvoTgo psql -U postgres -h $ip -d oauth2server -c "CREATE ROLE mxoo WITH SUPERUSER CREATEDB CREATEROLE LOGIN ENCRYPTED PASSWORD 'HWF28LQAcW5yDw5lfQwcY'"; PGPASSWORD=897wsMXvoTgo psql -U postgres -h $ip oauth2server < oauth2server.schema
+				fi
+				'''
+
+				/*** Install Redis ***/
+				sh '''#!/bin/bash
+    			PATH=/usr/local/bin:$PATH
+    			existNS=`kubectl get namespace | grep $namespace | wc -l`
+    			if test $existNS -ne 1; then
+    				kubectl create namespace $namespace
+    			fi
+    			helm uninstall redis-cluster -n $namespace
+    			kubectl delete pvc/redis-data-redis-cluster-master-0 -n $namespace
+    			helm install redis-cluster --set cluster.enabled=FALSE --set master.persistence.size=4Gi --set usePassword=false --set metrics.enabled=true --set master.disableCommands=FALSE --namespace=$namespace bitnami/redis
+    			count=0
+    			while test $count -lt 300
+    			do
+    				redisStatus=`kubectl get statefulset/redis-cluster-master -n $namespace -o json | jq '.status.readyReplicas'`
+    				[[ $redisStatus -gt 0 ]] && exit 0
+    				count=`expr $count + 1`
+    				sleep 1
+    			done
+    			exit 1
+    			'''
+    			sh '''#!/bin/bash
+    			PATH=/usr/local/bin:$PATH
+    			/usr/local/bin/kubectl delete svc/redis-pre-static -n $namespace; /usr/local/bin/kubectl expose pod/redis-cluster-master-0 --name='redis-pre-static' --type=ClusterIP --cluster-ip=$redis_ip -n $namespace
+    			'''
+				/*** Install MX ***/
+				sh '''#!/bin/bash
+				PATH=/usr/local/bin:$PATH
+				components=('mxoo-abe' 'mxoo-aftersale' 'mxoo-auth' 'mxoo-order' 'mxoo-order-consumer' 'mxoo-dashboard' 'mxoo-auth-zalo' 'mxoo-order-zalo' 'mxoo-order-consumer-zalo' 'mxoo-auth-momo' 'mxoo-order-momo' 'mxoo-order-consumer-momo')
+				cd /data/scripts/premx
+				for mx in ${components[@]}
+				do
+					helm uninstall $mx -n $namespace
+					helm install $mx -n $namespace ./$mx
+				done
+				'''
+			}
+		}
+		stage('Test') {
+			steps {
+				sh '''#!/bin/bash
+				PATH=/usr/local/bin:$PATH
+				components=('mxoo-abe' 'mxoo-auth' 'mxoo-order' 'mxoo-order-consumer' 'mxoo-auth-zalo' 'mxoo-order-zalo' 'mxoo-order-consumer-zalo' 'mxoo-auth-momo' 'mxoo-order-momo' 'mxoo-order-consumer-momo')
+				for mx in ${components[@]}
+				do
+					status=`kubectl logs deployment/$mx -n $namespace | grep success | wc -l`
+					if test $status -gt 0
+					then
+						components=(${components[@]/*${mx}*/})
+					fi
+				done 
+				[[ ${#components[@]} -gt 0 ]] && exit 1
+				exit 0 
+				'''
+			}
+		}
+	}
+	post {
+		always {
+			deleteDir()
+			sh '/usr/local/bin/kubectl delete svc/postgresql-tmp -n $namespace'
+			sh '/usr/local/bin/kubectl delete svc/postgresql-aftersale-tmp -n $namespace'
+			/*** 
+			sh '''#!/bin/bash
+    		docker rmi -f $(docker image ls -aq)
+    		count=`docker image ls -aq | wc -l`
+    		if test $count -eq 0; then
+    			exit 0
+    		fi
+    		'''
+    		***/
+    		script {
+        	emailext(to: "$RECIPIENTLIST",subject: "Jenkins Build ${currentBuild.currentResult}: Job ${env.JOB_NAME}",body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}")
+			}
+		}
+	}
+}

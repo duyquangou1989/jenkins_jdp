@@ -1,5 +1,8 @@
 pipeline {
     agent any
+    environment {
+        git_tmp = '/data/git_tmp/dss_hl_pre_pro_staging'
+    }
     stages {
         stage('Checkout Staging') {
             steps {
@@ -9,16 +12,16 @@ pipeline {
         stage('Rsync To Git Temp Dir') {
             steps {
                 sh '''#!/bin/bash
-                mkdir -p /data/git_tmp/dss_hl_pre_pro
-                cd $WORKSPACE; rsync -avz --stats -r * /data/git_tmp/dss_hl_pre_pro/
+                mkdir -p $git_tmp
+                cd $WORKSPACE; rsync -avz --stats -r * $git_tmp/
                '''
             }
         }
         stage('Test') {
             steps {
                 sh '''#!/bin/bash
-                if [ -d /data/git_tmp/dss_hl_pre_pro ]; then
-                    cd /data/git_tmp/dss_hl_pre_pro
+                if [ -d $git_tmp ]; then
+                    cd $git_tmp
                     count=`ls | wc -l`
                     if test $count -eq 0; then
                         exit 1
@@ -26,11 +29,6 @@ pipeline {
                 fi
                 exit 0
                 '''
-            }
-        }
-        stage('Push To Master') {
-            steps {
-                build job: '4.1.PushStagingToMaster_PreDL'
             }
         }
     }

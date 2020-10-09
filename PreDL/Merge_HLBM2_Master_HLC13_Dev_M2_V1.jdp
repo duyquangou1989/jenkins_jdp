@@ -1,0 +1,67 @@
+pipeline {
+	agent any
+	environment {
+		report_receivers = "quang.tong quang.tong@vtijs.com"
+		sonar_report = '/data/sonarqube/reports/hlbm2/'
+		RECIPIENTLIST = 'quang.tong@vtijs.com'
+        git_tmp = '/data/git_tmp/hlbm2_master'
+	}
+	stages {
+		stage('Initialize') {
+            steps {
+                script {
+                    properties([pipelineTriggers([pollSCM('* * * * *')])])
+                }
+                git branch: 'master', credentialsId: 'a02cf3a2-1634-471f-b32e-4906b797b493', url: 'https://github.com/SuBCa/hlbm2'
+            }
+        }
+		stage('Checkout HLBM2 master branch') {
+			steps {
+				git([url: 'https://github.com/SuBCa/hlbm2', branch: 'master', credentialsId: 'a02cf3a2-1634-471f-b32e-4906b797b493'])
+			}
+		}
+		stage('SonarQube Analysis') {
+			steps {
+				script {
+					last_started = env.STAGE_NAME
+                    def scannerHome = tool 'QubeScanner';
+                        withSonarQubeEnv("LocalSonarQube") {
+                            sh "${tool("QubeScanner")}/bin/sonar-scanner \
+                            -Dsonar.projectKey=hlbm2 \
+                            -Dsonar.sources=. \
+                            -Dsonar.host.url=http://127.0.0.1:9000 \
+                            -Dsonar.login=4079ed92a5029fd12643dd0b83610e2af7d39d83"
+                        }
+                    sh '''#!/bin/bash
+                cd /data/sonarqube/plugins; java -jar sonar-cnes-report-3.2.2.jar -t c1552dd3314c9888c71c670d6bc9a85cdf40cfa2 -p hlbm2 -a 'quang.tong@vtijs.com' -efc -o $sonar_report
+            '''
+				}
+				sh 'echo -e "${report_receivers}" > /data/scripts/mycontacts.txt'
+				sh "cd /data/scripts; python3 report_email3.py -r $sonar_report -p HLBM2"
+			}
+		}
+        stage('Rsync To TMP Git') {
+            steps {
+                sh '''#!/bin/bash
+                mkdir -p $git_tmp
+                cd $WORKSPACE && rsync -avz --stats -r * $git_tmp
+                '''
+            }
+        }
+        stage('Push to DevM2 Branch') {
+            steps {
+                build job: 'PushMasterHLBM2ToHLC13DevM2'
+            }
+        }
+	}
+post {
+	always {
+		deleteDir()
+		sh "echo 'Remove github tmp dir'"
+		sh 'cd /data/git_tmp/; rm -rf *'
+		script {
+        	emailext(to: "$RECIPIENTLIST",subject: "Jenkins Build ${currentBuild.currentResult}: Job ${env.JOB_NAME}",body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}")
+		}
+	}
+}
+}

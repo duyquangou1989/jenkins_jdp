@@ -1,0 +1,45 @@
+pipeline {
+	agent any
+    environment {
+        git_tmp = '/data/git_tmp/dev_pyco_master'
+    }
+	stages {
+		stage('Initialize') {
+            steps {
+                script {
+                    properties([pipelineTriggers([pollSCM('* * * * *')])])
+                }
+                git branch: 'master', credentialsId: 'a02cf3a2-1634-471f-b32e-4906b797b493', url: 'https://github.com/DSS-VTI/dev_Pyco'
+            }
+        }
+		stage('Checkout DPYCO master branch') {
+			steps {
+				git([url: 'https://github.com/DSS-VTI/dev_Pyco', branch: 'master', credentialsId: '0fea8675-defc-4420-94f4-6b62e6b34e25'])
+			}
+		}
+        stage('Rsync To Temp Git') {
+            steps {
+                sh '''#!/bin/bash
+                mkdir -p $git_tmp
+                cd $WORKSPACE && rsync -avz --stats -r * $git_tmp
+                '''
+            }
+        }
+        stage('Push to hlc13 devpyco branch') {
+            steps {
+                build job: 'PushDevPycoRepoToHLC13DevPyco'
+            }
+        }
+	}
+    post {
+	    always {
+            deleteDir()
+            sh "echo 'Remove github tmp dir'"
+            sh 'cd /data/git_tmp/; rm -rf *'
+            script {
+                RECIPIENTLIST = 'hung.phan@vtijs.com'
+                emailext(to: "$RECIPIENTLIST",subject: "Jenkins Build ${currentBuild.currentResult}: Job ${env.JOB_NAME}",body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}")
+		    }
+	    }
+    }
+}

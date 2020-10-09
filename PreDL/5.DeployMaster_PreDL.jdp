@@ -18,7 +18,7 @@ pipeline {
         stage('Rsync Code To PreDL App') {
             steps {
                 sh '''#!/bin/bash
-                ssh root@${predl_app} "rm -rf $staging_dir && mkdir -p $master_dir"
+                ssh root@${predl_app} "rm -rf $master_dir && mkdir -p $master_dir"
                 '''
                 sh '''#!/bin/bash
                 rsync -avz -r * --stats -e "ssh" root@${predl_app}:$master_dir/
@@ -27,7 +27,7 @@ pipeline {
         }
         stage('Deploy PreDL App') {
             steps {
-                echo 'Deploy App on master branch'
+                sh 'ssh root@${predl_app} "bash /data/script/auto-master.bash"'
             }
         }
         stage('Deploy PreDL DB') {

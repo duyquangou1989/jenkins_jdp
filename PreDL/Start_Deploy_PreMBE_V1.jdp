@@ -1,0 +1,40 @@
+pipeline {
+    agent any
+    environment {
+        git_tmp = '/data/git_tmp/mbe_tmp'
+    }
+    stages {
+        stage('Checkout SubCa MX Repo') {
+            steps {
+				git([url: 'https://github.com/SuBCa/mappbe', branch: 'release/2.0.4', credentialsId: '0fea8675-defc-4420-94f4-6b62e6b34e25'])
+			}
+        }
+        stage('Rsync to TMP Git') {
+            steps { 
+                sh '''#!/bin/bash
+                    rm -rf $git_tmp && mkdir -p $git_tmp && rsync -avz --stats -r * $git_tmp/
+                '''
+            }
+        }
+        stage('Push to dss_pre_mbe') {
+            steps {
+                build job: 'PushMBEToPreMBEDSS'
+            }
+        }
+        stage('Deploy PreMBE ') {
+            steps {
+                build job: 'Deploy_PreMBE_V1'
+            }
+        }
+    }
+    post {
+        always {
+            deleteDir()
+            sh '''#!/bin/bash
+            if [[ -d $git_tmp ]]; then
+                rm -rf $git_tmp/*
+            fi
+            '''
+        }
+    }
+}

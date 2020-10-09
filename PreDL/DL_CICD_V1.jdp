@@ -1,0 +1,65 @@
+pipeline {
+    agent any
+    stages {
+        stage('Checkout Addons HLC13 master') {
+            steps {
+                build job: '1.CheckoutAddonsHLC13'
+            }
+        }
+        stage('Push Addons To DSS Prepro Staging') {
+            steps {
+                build job: '1.1.PushAddonsToStaging'
+            }
+        }
+        stage('Checkout Odoo Packages') {
+            steps {
+                build job: '2.CheckoutOdooPkgsBranch_PreDL'
+            }
+        }
+        stage('Push To DSS Prepro Staging') {
+            steps {
+                build job: '2.1.PushToStaging_PreDL'
+            }
+        }
+        stage('Deploy Staging') {
+            steps {
+                build job: '3.DeployStagingPreDL'
+            }
+        }
+        stage('Checkout Staging') {
+            steps {
+                build job: '4.CheckoutStaging_PreDL'
+            }
+        }
+        stage('Push DSS Staging To Master') {
+            steps {
+                build job: '4.1.PushStagingToMaster_PreDL'
+            }
+        }
+        stage('Deploy Master') {
+            steps {
+                build job: '5.DeployMaster_PreDL'
+            }
+        }
+        stage('Sync Pre To Prod') {
+            steps {
+                build job: '6.SyncPreToProd'
+            }
+        }
+        stage('Deploy Production') {
+            steps {
+                echo 'Deploy Production'
+            }
+        }
+        stage('Deploy Production Final') {
+            steps {
+                echo 'Deploy Production Final'
+            }
+        }
+    }
+    post {
+        always {
+            deleteDir()
+        }
+    } 
+}

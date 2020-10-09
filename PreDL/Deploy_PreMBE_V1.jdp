@@ -1,0 +1,133 @@
+pipeline {
+    agent any
+    environment {
+    	registry = "asia.gcr.io/vti-sandbox-mobile"
+    	dockerImage = ""
+    	namespace = "prembe-prod"
+    	redis_ip = "10.8.1.244"
+    	RECIPIENTLIST = 'quang.tong@vtijs.com,hung.phan@vtijs.com'
+    }
+    stages {
+    	stage('Checkout') {
+    		steps {
+    			git([url: 'https://github.com/DSS-VTI/dss_pre_mappbe', branch: 'master', credentialsId: '0fea8675-defc-4420-94f4-6b62e6b34e25'])
+    		}
+    	}
+    	stage('Build Image') {
+    		steps {
+    			sh "cd $WORKSPACE; docker build . -f docker/api.Dockerfile -t $registry/mbe-api-gateway-mbe-prod:$BUILD_NUMBER"
+    			sh "cd $WORKSPACE; docker build . -f docker/customer.Dockerfile -t $registry/mbe-customer-mbe-prod:$BUILD_NUMBER"
+    			sh "cd $WORKSPACE; docker build . -f docker/dl.Dockerfile -t $registry/dl-mbe-mbe-prod:$BUILD_NUMBER"
+    			sh "cd $WORKSPACE; docker build . -f docker/mx.Dockerfile -t $registry/mbe-mx-mbe-prod:$BUILD_NUMBER"
+    			sh "cd $WORKSPACE; docker build . -f docker/voucher.Dockerfile -t $registry/mbe-voucher-mbe-prod:$BUILD_NUMBER"
+    		}
+    	}
+    	stage('Push Image') {
+    		steps {
+    			sh 'gcloud docker -- push $registry/mbe-api-gateway-mbe-prod:$BUILD_NUMBER'
+    			sh 'gcloud docker -- push $registry/mbe-customer-mbe-prod:$BUILD_NUMBER'
+    			sh 'gcloud docker -- push $registry/dl-mbe-mbe-prod:$BUILD_NUMBER'
+    			sh 'gcloud docker -- push $registry/mbe-mx-mbe-prod:$BUILD_NUMBER'
+    			sh 'gcloud docker -- push $registry/mbe-voucher-mbe-prod:$BUILD_NUMBER'
+    		}
+    	}
+    	stage('Config') {
+    		steps {
+    			sh "echo 'Call to helm config script'"
+    			sh 'cd /data/scripts/vtisandbox_mobile; bash mbe.sh'
+    		}
+    	}
+    	stage('Deploy') {
+    		steps {
+    			sh 'gcloud container clusters get-credentials hlc13-prepro --zone asia-southeast1-b --project vti-sandbox-mobile'
+    			/*** Install Redis ***/
+    			sh '''#!/bin/bash
+    			PATH=/usr/local/bin:$PATH
+    			existNS=`kubectl get namespace | grep $namespace | wc -l`
+    			if test $existNS -ne 1; then
+    				kubectl create namespace $namespace
+    			fi
+    			helm uninstall redis-cluster -n $namespace
+    			kubectl delete pvc/redis-data-redis-cluster-master-0 -n $namespace
+    			helm install redis-cluster --set cluster.enabled=FALSE --set master.persistence.size=4Gi --set usePassword=false --set metrics.enabled=true --set master.disableCommands=FALSE --namespace=$namespace bitnami/redis
+    			count=0
+    			while test $count -lt 300
+    			do
+    				redisStatus=`kubectl get statefulset/redis-cluster-master -n $namespace -o json | jq '.status.readyReplicas'`
+    				[[ $redisStatus -gt 0 ]] && exit 0
+    				count=`expr $count + 1`
+    				sleep 1
+    			done
+    			exit 1
+    			'''
+    			/*** ***/
+    			sh '''#!/bin/bash
+    			PATH=/usr/local/bin:$PATH
+    			/usr/local/bin/kubectl delete svc/redis-pre-static -n $namespace; /usr/local/bin/kubectl expose pod/redis-cluster-master-0 --name='redis-pre-static' --type=ClusterIP --cluster-ip=$redis_ip -n $namespace
+    			'''
+    			/*** MBE ***/
+    			sh '''#!/bin/bash
+    			PATH=/usr/local/bin:$PATH
+    			cd /data/scripts/vtisandbox_mobile
+    			mbe_arr=()
+    			for i in `ls`
+    			do
+    				if [ -d $i ]; then
+	    				echo "Installing $i"
+	    				helm uninstall $i -n $namespace
+	    				helm install $i -n $namespace ./$i
+	    				mbe_arr+=("$i")
+	    			fi
+    			done
+
+    			count=0
+    			while test $count -lt 300
+    			do
+    				for mbe in ${mbe_arr[@]}
+    				do
+    					statusmbe=`kubectl get deployment/$mbe -n $namespace -o json | jq '.status.readyReplicas'`
+    					if [[ $statusmbe -gt 0 ]]
+    					then
+    						mbe_arr=(${mbe_arr[@]/*${mbe}*/})
+    					fi
+    				done
+    				[[ ${#mbe_arr[@]} -eq 0 ]] && exit 0
+    				count=`expr $count + 1`
+    				sleep 1
+    			done
+    			exit 1
+    			'''
+    		}
+    	}
+    	stage('Test') {
+    		steps {
+    			/*** MBE-API ***/
+    			sh "curl -sL 'https://pre-mbe-api.dssvti.com/api/v1' --header 'Content-Type: application/json' --header 'x-powered-by: DSS' --header 'X-DSS-Application: Highlands Mobile' --header 'x-dss-api-version: v1' --header 'x-dss-application-version: v1.0.0' --header 'x-dss-organization-private-key: wDSOm+BfUmK8T04oU5i494AvWeFgse2Mzej6EGxenNpdVw1pXswlM95PfTh+u/5e6LPWY3dHzYjnQ1K3DaofI0jfkCojHmB379s9QgX7JhRagPOJm+guxoN7ukue99BzjlVhQQmeS6UNe/Q492zrtbliCvuxJwwn7+gPkbj27Ng=' |  grep 'Welcome'"
+    			/*** DL MBE ***/
+    			sh '''#!/bin/bash
+    			statusMbe=`curl -sL 'https://pre-mbe.dssvti.com/health' | jq '.status'`
+    			echo "status = $statusMbe" 
+    			[[ $statusMbe="\"ok\"" ]]
+    			'''
+    			/*** MBE-MX ***/
+    			sh "curl -sL 'https://pre-mbe-mx.dssvti.com'/api/v1 | grep 'Welcome'"
+    		}
+    	}
+    }
+    post {
+    	always {
+    		deleteDir()
+    		/***sh '''#!/bin/bash
+    		docker rmi -f $(docker image ls -aq)
+    		count=`docker image ls -aq | wc -l`
+    		if test $count -eq 0; then
+    			exit 0
+    		fi
+    		'''
+    		***/
+    		script {
+        	emailext(to: "$RECIPIENTLIST",subject: "Jenkins Build ${currentBuild.currentResult}: Job ${env.JOB_NAME}",body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}")
+		}
+    	}
+    }
+}

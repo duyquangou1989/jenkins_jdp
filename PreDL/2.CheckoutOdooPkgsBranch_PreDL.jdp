@@ -28,11 +28,6 @@ pipeline {
                 '''
             }
         }
-        stage('Push To Staging') {
-            steps {
-                build job: '2.1.PushToStaging_PreDL'
-            }
-        }
     }
     post {
         always {

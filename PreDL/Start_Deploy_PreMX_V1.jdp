@@ -1,0 +1,36 @@
+pipeline {
+    agent any
+    environment {
+        git_tmp = '/data/git_tmp/mx_tmp'
+    }
+    stages {
+        stage('Checkout SubCa MX Repo') {
+            steps {
+				git([url: 'https://github.com/SuBCa/MX', branch: 'master', credentialsId: '0fea8675-defc-4420-94f4-6b62e6b34e25'])
+			}
+        }
+        stage('Rsync to TMP Git') {
+            steps { 
+                sh '''#!/bin/bash
+                    rm -rf $git_tmp && mkdir -p $git_tmp && rsync -avz --stats -r * $git_tmp/
+                '''
+            }
+        }
+        stage('Push to dss_pre_mx') {
+            steps {
+                build job: 'PushMXToPreMXDSS'
+            }
+        }
+        stage('Deploy PreMX ') {
+            steps {
+                build job: 'Deploy_PreMX_V1'
+            }
+        }
+    }
+    post {
+        always {
+            deleteDir()
+            sh 'rm -rf $git_tmp'
+        }
+    }
+}
