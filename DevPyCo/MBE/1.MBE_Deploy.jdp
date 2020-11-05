@@ -1,0 +1,70 @@
+pipeline {
+    agent any
+    environment {
+        scriptdir='/data/scripts/dpyco/vtisandbox_mobile/'
+    }
+    stages {
+        stage('CheckOut mappbe devPyCo') {
+            steps {
+                git([url: 'https://github.com/DSS-VTI/mappbe', branch: 'master', credentialsId: '0fea8675-defc-4420-94f4-6b62e6b34e25'])
+            }
+        }
+        stage('Build MBE Image') {
+            steps {
+                sh 'docker build . -f docker/api.Dockerfile -t asia.gcr.io/vti-sandbox-mobile/mbe-api-partner:$BUILD_NUMBER'
+                sh 'docker build . -f docker/customer.Dockerfile -t asia.gcr.io/vti-sandbox-mobile/mbe-customer-partner:$BUILD_NUMBER'
+                sh 'docker build . -f docker/dl.Dockerfile -t asia.gcr.io/vti-sandbox-mobile/mbe-dl-partner:$BUILD_NUMBER'
+                sh 'docker build . -f docker/mx.Dockerfile -t asia.gcr.io/vti-sandbox-mobile/mbe-mx-partner:$BUILD_NUMBER'
+                sh 'docker build . -f docker/voucher.Dockerfile -t asia.gcr.io/vti-sandbox-mobile/mbe-voucher-partner:$BUILD_NUMBER'
+            }
+        }
+        stage('Push GCR') {
+            steps {
+                sh 'gcloud docker -- push asia.gcr.io/vti-sandbox-mobile/mbe-api-partner:$BUILD_NUMBER'
+                sh 'gcloud docker -- push asia.gcr.io/vti-sandbox-mobile/mbe-customer-partner:$BUILD_NUMBER'
+                sh 'gcloud docker -- push asia.gcr.io/vti-sandbox-mobile/mbe-dl-partner:$BUILD_NUMBER'
+                sh 'gcloud docker -- push asia.gcr.io/vti-sandbox-mobile/mbe-mx-partner:$BUILD_NUMBER'
+                sh 'gcloud docker -- push asia.gcr.io/vti-sandbox-mobile/mbe-voucher-partner:$BUILD_NUMBER'
+            }
+        }
+        stage('Config') {
+            steps {
+                sh 'cd $scriptdir; bash mbe.sh'
+            }
+        }
+        //stage ('Uninstall Exist Services') {
+        //    steps {
+        //        sh 'gcloud container clusters get-credentials hlc13-partner --zone asia-southeast1-b --project vti-sandbox-mobile'
+        //        sh '''#!/bin/bash
+        //        components=('dl-mbe' 'mbe-api-gateway' 'mbe-customer' 'mbe-mx' 'mbe-voucher')
+        //        for item in ${components[*]}
+        //        do
+        //            echo "Uninstall $item"
+        //            /usr/local/bin/helm uninstall $item --namespace=sandbox
+         //       done
+        //        exit 0
+        //        '''
+        //    }
+        //}
+        stage('Install') {
+            steps {
+                sh 'gcloud container clusters get-credentials hlc13-partner --zone asia-southeast1-b --project vti-sandbox-mobile'
+                sh 'cd $scriptdir; /usr/local/bin/helm upgrade dl-mbe --namespace=default ./dl-mbe'
+                sh 'cd $scriptdir; /usr/local/bin/helm upgrade mbe-api-gateway --namespace=default ./mbe-api-gateway'
+                sh 'cd $scriptdir; /usr/local/bin/helm upgrade mbe-customer --namespace=default ./mbe-customer'
+                sh 'cd $scriptdir; /usr/local/bin/helm upgrade mbe-mx --namespace=default ./mbe-mx'
+                sh 'cd $scriptdir; /usr/local/bin/helm upgrade mbe-voucher --namespace=default ./mbe-voucher'
+            }
+        }
+        stage('Test') {
+            steps {
+                echo 'Test'
+            }
+        }
+    }
+    post {
+        always {
+            deleteDir()
+        }
+    }
+}

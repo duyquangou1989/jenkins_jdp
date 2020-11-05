@@ -1,0 +1,70 @@
+pipeline {
+    agent any
+    environment {
+        dl_url="https://dl.dssvti.com"
+        dladdonspath="/tmp/dl-addons13-ex"
+    }
+    stages {
+        stage('Re Verify HTTP DL status') {
+            steps {
+                sh '''#!/bin/bash
+                    stats=`curl -I -s -L "${dl_url}" | grep "HTTP"  | cut -d' ' -f2`
+                    if test $stats -eq 200; then 
+                        echo "Web App http status : $stats"
+                        echo "Web App not need rollback"
+                        exit 1; 
+                    else
+                        echo "Web App http status : $stats"
+                    fi
+                '''
+            }
+        }
+        stage('Rollback Addons') {
+            steps {
+                sh 'ssh root@10.148.0.25 "cd /data/script; sh rollback_dl.sh ${dladdonspath}"'
+            }
+        }
+        stage('Restart DL') {
+            steps {
+                sh 'echo "Restart DL"'
+                sh 'sleep 30'
+            }
+        }
+        stage('Test DL') {
+            steps {
+                sh '''#!/bin/bash
+                    stats=`curl -I -s -L "${dl_url}" | grep "HTTP"  | cut -d' ' -f2`
+                    if test $stats -ne 200; then 
+                        echo "Web App http status : $stats"
+                        exit 1; 
+                    else
+                        echo "Web App http status : $stats"
+                    fi
+                '''
+            }
+        }
+    }
+    post {
+        always {
+            deleteDir()
+        }
+        success {
+            script {
+                sh '''#!/bin/bash  
+                datemail=`date +%Y-%m-%d`
+                cd /data/scripts ; 
+                echo 'Rollback Success' > default.txt
+                python3 dl_cicd_email.py -s "[SUCCESS][DLPROD] - Jenkins Rollback SUCCESS $datemail" -b default.txt
+                '''
+            }
+        }
+        failure {
+            sh '''#!/bin/bash  
+                datemail=`date +%Y-%m-%d`
+                cd /data/scripts ; 
+                echo 'Rollback Failed' > default.txt
+                cd /data/scripts ; python3 dl_cicd_email.py -s "[FAILURE][DLPROD] - Jenkins Rollback FAILURE $datemail" -b default.txt
+                '''
+        }
+    }
+}

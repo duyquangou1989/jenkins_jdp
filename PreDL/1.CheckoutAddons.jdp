@@ -4,15 +4,23 @@ pipeline {
         path_tmp = '/data/git_tmp/addons'
     }
     stages {
-        stage('Checkout Addons HLC13 master') {
+        stage('Checkout Addons HLC13 master_prod') {
             steps {
-                git([url: 'https://github.com/SuBCa/hlc13', branch: 'master', credentialsId: '0fea8675-defc-4420-94f4-6b62e6b34e25'])
+                git([url: 'https://github.com/SuBCa/hlc13', branch: 'master_prod', credentialsId: '0fea8675-defc-4420-94f4-6b62e6b34e25'])
+            }
+        }
+        stage('Update release note')
+        {
+            steps {
+                sh '''#!/bin/bash
+                cat README.md > /data/scripts/release_note.md   
+                '''
             }
         }
         stage('Rsync to git tmp') {
             steps {
                 sh '''#!/bin/bash
-                mkdir -p $path_tmp && rsync -avz --stats -r dss_mbe_connector $path_tmp/ && rsync -avz --stats -r dss_mxoo_config $path_tmp/
+                mkdir -p $path_tmp && rsync -avz --stats -r * $path_tmp/
                 '''
             }
         }
@@ -20,6 +28,11 @@ pipeline {
     post {
         always {
             deleteDir()
+            
+                sh '''#!/bin/bash  
+                cd /data/scripts ; python3 cicd_email.py -s "PreDL Pipeline" -b release_note.md
+                '''
+            
         }
     }
 }

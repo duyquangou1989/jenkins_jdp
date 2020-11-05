@@ -70,22 +70,34 @@ pipeline {
                 build job: '5.DeployMaster_PreDL'
             }
         }
+        stage('Sync Pre To Prod') {
+            steps {
+                script {
+                    last_started = env.STAGE_NAME
+                }
+                build job: '6.SyncPreToProd'
+            }
+        }
     }
     post {
         always {
             deleteDir()
-            script {
-                emailext(to: "$RECIPIENTLIST",subject: "Jenkins Build ${currentBuild.currentResult}: Job ${env.JOB_NAME}",body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}")
-            }
+            //script {
+            //    emailext(to: "$RECIPIENTLIST",subject: "Jenkins Build ${currentBuild.currentResult}: Job ${env.JOB_NAME}",body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}")
+            //}
         }
         failure {
             script {
-                emailext(to: "$DEVLIST",subject: "Jenkins Build ${currentBuild.currentResult}: Job ${env.JOB_NAME}",body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}\n At Stage '$last_started'")
+                emailext(to: "$DEVLIST",subject: "PreDL Jenkins Build ${currentBuild.currentResult}: Job ${env.JOB_NAME}",body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}\n At Stage '$last_started'")
             }
         }
         success {
             script {
-                emailext(to: "$DEVLIST",subject: "Jenkins Build ${currentBuild.currentResult}: Job ${env.JOB_NAME}",body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}\n Pre Dl Url: ${predl_url}")
+                //emailext(to: "$DEVLIST",subject: "Jenkins Build ${currentBuild.currentResult}: Job ${env.JOB_NAME}",body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}\n Pre Dl Url: ${predl_url}")
+                sh '''#!/bin/bash  
+                datemail=`date +%Y-%m-%d`
+                cd /data/scripts ; python3 cicd_email.py -s "PreDL Jenkins Build $datemail" -b release_note.md
+                '''
             }
         }
     }

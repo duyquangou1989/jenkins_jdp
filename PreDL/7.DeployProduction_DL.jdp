@@ -1,0 +1,89 @@
+pipeline {
+    agent any
+    environment {
+        dl_url='https://dl.dssvti.com'
+        dlapp='10.148.0.25'
+    }
+    stages {
+        stage('Backup Addons') {
+            steps {
+                sh '''#!/bin/bash
+                    PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin
+                    datebk=`date +%d%m%Y`
+                    ssh root@${dlapp} "rm -rf /data/backup/addons_bk_${datebk}; mkdir -p /data/backup/addons_bk_${datebk}; cp -r /data/dl-addons13/ /data/backup/addons_bk_${datebk}/dl-addons13"
+                '''
+            }
+        }
+        stage('Verify Backup Addons') {
+            steps { 
+                sh '''#!/bin/bash
+                    PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin
+                    datebk=`date +%d%m%Y`
+                    numdiff=`ssh root@${dlapp} "diff -r /data/dl-addons13 /data/backup/addons_bk_${datebk}/dl-addons13 | wc -l"`
+                    echo "Diff Number: $numdiff"
+                    echo "Addons Origin Size"
+                    ssh root@${dlapp} "du -hs /data/dl-addons13/"
+                    echo "Addons Backup Size"
+                    ssh root@${dlapp} "du -hs /data/backup/addons_bk_${datebk}/dl-addons13/"
+                    [[ $numdiff -ne 0 ]] && exit 1 || exit 0
+                '''
+            }
+        }
+        stage('Copy Addons from jenkins master dir') {
+            steps {
+                sh '''#!/bin/bash
+                    echo "Start run rsync /home/jenkins/jenkins_master/add-ons/* /data/dl-addons13"
+                    ssh root@${dlapp} "/bin/rsync -avz --stats -r /home/jenkins/jenkins_master/add-ons/* /data/dl-addons13"
+                '''
+
+                sh '''#!/bin/bash
+                    echo "Start chown odoo /data/dl-addons13"
+                    ssh root@${dlapp} "/bin/chown -R odoo:odoo /data/dl-addons13/"
+                '''
+            }
+        }
+        stage('Restart DL') {
+            steps {
+                sh '''#!/bin/bash
+                ssh root@${dlapp} "systemctl restart odoo"
+                '''
+                       
+                sh 'sleep 60'
+            }
+        }
+        stage('Test DL status') {
+            steps {
+                sh '''#!/bin/bash
+                    stats=`curl -I -s -L "${dl_url}" | grep "HTTP"  | cut -d' ' -f2`
+                    if test $stats -ne 200; then 
+                        echo "Web App http status : $stats"
+                        exit 1; 
+                    else
+                        echo "Web App http status : $stats"
+                    fi
+                '''
+            }
+        } 
+    }
+    post {
+        always {
+            deleteDir()
+        }
+        success {
+            script {
+                sh '''#!/bin/bash  
+                datemail=`date +%Y-%m-%d`
+                cd /data/scripts ; python3 dl_cicd_email.py -s "[SUCCESS][DLPROD] - Jenkins Build SUCCESS $datemail" -b release_note.md
+                '''
+            }
+        }
+        failure {
+            script {
+                sh '''#!/bin/bash  
+                datemail=`date +%Y-%m-%d`
+                cd /data/scripts ; python3 dl_cicd_email.py -s "[FAILURE][DLPROD] - Jenkins Build FAILURE $datemail" -b release_note.md
+                '''
+            }
+        }
+    }
+}

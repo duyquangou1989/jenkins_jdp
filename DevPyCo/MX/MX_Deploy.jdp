@@ -1,0 +1,70 @@
+pipeline {
+    agent any
+    environment {
+        scriptdir='/data/scripts/dpyco'
+    }
+    stages {
+        stage('CheckOut MX devPyCo') {
+            steps {
+                git([url: 'https://github.com/DSS-VTI/MX', branch: 'master', credentialsId: '0fea8675-defc-4420-94f4-6b62e6b34e25'])
+            }
+        }
+        stage('Build MX Image') {
+            steps {
+                sh 'docker build . -f docker/mxoo-abe.Dockerfile -t asia.gcr.io/vti-sandbox-mobile/mxoo-abe-partner:$BUILD_NUMBER'
+                sh 'docker build . -f docker/mxoo-auth.Dockerfile -t asia.gcr.io/vti-sandbox-mobile/mxoo-auth-partner:$BUILD_NUMBER'
+                sh 'docker build . -f docker/mxoo-order-consumer.Dockerfile -t asia.gcr.io/vti-sandbox-mobile/mxoo-order-consumer-partner:$BUILD_NUMBER'
+                sh 'docker build . -f docker/mxoo-order.Dockerfile -t asia.gcr.io/vti-sandbox-mobile/mxoo-order-partner:$BUILD_NUMBER'
+            }
+        }
+        stage('Push GCR') {
+            steps {
+                sh 'gcloud docker -- push asia.gcr.io/vti-sandbox-mobile/mxoo-abe-partner:$BUILD_NUMBER'
+                sh 'gcloud docker -- push asia.gcr.io/vti-sandbox-mobile/mxoo-auth-partner:$BUILD_NUMBER'
+                sh 'gcloud docker -- push asia.gcr.io/vti-sandbox-mobile/mxoo-order-consumer-partner:$BUILD_NUMBER'
+                sh 'gcloud docker -- push asia.gcr.io/vti-sandbox-mobile/mxoo-order-partner:$BUILD_NUMBER'
+            }
+        }
+        stage('Config') {
+            steps {
+                sh 'cd $scriptdir; bash encrypt.sh'
+            }
+        }
+        //stage ('Uninstall Exist Services') {
+        //    steps {
+        //        sh 'gcloud container clusters get-credentials hlc13-partner --zone asia-southeast1-b --project vti-sandbox-mobile'
+        //        sh '''#!/bin/bash
+        //        components=('dl-mbe' 'mbe-api-gateway' 'mbe-customer' 'mbe-mx' 'mbe-voucher')
+        //        for item in ${components[*]}
+        //        do
+        //            echo "Uninstall $item"
+        //            /usr/local/bin/helm uninstall $item --namespace=sandbox
+         //       done
+        //        exit 0
+        //        '''
+        //    }
+        //}
+        stage('Install') {
+            //steps {
+            //    echo 'Install'
+            //}
+            steps {
+                sh 'gcloud container clusters get-credentials hlc13-partner --zone asia-southeast1-b --project vti-sandbox-mobile'
+                sh 'cd $scriptdir/dev; /usr/local/bin/helm upgrade mxoo-abe-mbe-prod --namespace=default ./mxoo-abe'
+                sh 'cd $scriptdir/dev; /usr/local/bin/helm upgrade mxoo-auth-mbe-prod --namespace=default ./mxoo-auth'
+                sh 'cd $scriptdir/dev; /usr/local/bin/helm upgrade mxoo-order-mbe-prod --namespace=default ./mxoo-order'
+                sh 'cd $scriptdir/dev; /usr/local/bin/helm upgrade mxoo-order-consumer-mbe-prod --namespace=default ./mxoo-order-consumer'
+            }
+        }
+        stage('Test') {
+            steps {
+                echo 'Test'
+            }
+        }
+    }
+    post {
+        always {
+            deleteDir()
+        }
+    }
+}
