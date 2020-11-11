@@ -1,0 +1,67 @@
+pipeline {
+    agent any
+    environment {
+        infra_script = '/data/scripts/auto_predl'
+    }
+    stages {
+        stage('Test Database Server online') {
+            steps {
+                sh '''#!/bin/bash
+                    check=$(gcloud compute instances list --project=vti-dl | grep predl-db-demo | wc -l)
+                    if test $check -ne 1; then
+                        echo "Database Server still not provision"
+                        exit 1
+                    fi
+                '''
+            }
+        }
+        stage('Provision DL App ') {
+            steps { 
+                sh '''#!/bin/bash
+                    check=$(gcloud compute instances list --project=vti-dl | grep predl-app-demo | wc -l)
+                    if test $check -eq 1; then
+                        cd ${infra_script}; terraform destroy -auto-approve -target google_compute_instance.dlapp
+                        [[ $? -ne 0 ]] && exit 1
+                    fi
+
+                    cd ${infra_script}; terraform apply -auto-approve -target google_compute_instance.dlapp
+                '''
+            }
+        }
+        stage('Provision DL Elastic') {
+            steps {
+                sh '''#!/bin/bash
+                    check=$(gcloud compute instances list --project=vti-dl | grep predl-elastic-demo | wc -l)
+                    if test $check -eq 1; then
+                        cd ${infra_script}; terraform destroy -auto-approve -target google_compute_instance.dlelas
+                        [[ $? -ne 0 ]] && exit 1
+                    fi
+
+                    cd ${infra_script}; terraform apply -auto-approve -target google_compute_instance.dlelas
+                '''
+            }
+        }
+        stage('20s Wait Infras Up') {
+            steps {
+                sh 'sleep 20'
+            }
+        }
+        stage('Configuring DL APP & Elastic') {
+            steps {
+                sh '''#!/bin/bash
+                    cd ${infra_script}; ansible-playbook -i hosts.txt site.yml 
+                '''
+            }
+        }
+        stage('Test') {
+            steps {
+                echo 'Test'
+            }
+        }
+    }
+    post {
+        always {
+            deleteDir()
+        }
+    }
+}

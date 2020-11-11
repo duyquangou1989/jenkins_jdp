@@ -1,0 +1,43 @@
+pipeline {
+    agent any
+    environment {
+        infra_script = '/data/scripts/auto_predl'
+    }
+    stages {
+        stage('Check exist & ReProvision if need') {
+            steps {
+                sh '''#!/bin/bash
+                    check=$(gcloud compute instances list --project=vti-dl | grep predl-db-demo | wc -l)
+                    if test $check -eq 1; then
+                        cd ${infra_script}; terraform destroy -auto-approve -target google_compute_instance.dldb
+                        [[ $? -ne 0 ]] && exit 1
+                    fi
+
+                    cd ${infra_script}; terraform apply -auto-approve -target google_compute_instance.dldb
+                '''
+            }
+        }
+        stage('Sleep Wait Infras Up ') {
+            steps {
+                sh 'sleep 20'
+            }
+        }
+        stage('Configuring DL DB') {
+            steps {
+                sh '''#!/bin/bash
+                    cd ${infra_script}; ansible-playbook -i hosts.txt site_db.yml
+                '''
+            }
+        }
+        stage('Test') {
+            steps {
+                echo 'Test'
+            }
+        }
+    }
+    post {
+        always {
+            deleteDir()
+        }
+    }
+}
