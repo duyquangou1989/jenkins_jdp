@@ -1,0 +1,48 @@
+pipeline {
+    agent any
+    environment {
+        master_dir='/root/jenkins_master'
+        pro_dir = '/home/jenkins/jenkins_master'
+        dlprod = '10.148.0.25'
+        preapp = '10.30.50.211'
+    }
+    stages {
+        stage('Upload Code master Pre To Pro'){
+            steps {
+                echo 'Start'
+                sh '''#!/bin/bash
+                ssh root@$preapp "[[ -d $master_dir ]]" 
+                '''
+                /*
+                delete exist source dir on Pro
+                */
+                sh '''#!/bin/bash
+                    ssh root@$dlprod "rm -rf $pro_dir"
+                '''
+                /*
+                Upload Source stable master from Pre to Prod
+                */
+                sh 'ssh root@$preapp "bash /root/upload_to_pro.sh"'
+            }
+        }
+        stage('Extract Source on Prod') {
+            steps {
+                sh '''#!/bin/bash
+                ssh root@$dlprod "cd /home/jenkins && tar -zxf jenkins_master.tgz && rm -f jenkins_master.tgz"
+                '''
+            }
+        }
+        stage('Test') {
+            steps {
+                sh '''#!/bin/bash
+                    ssh root@$dlprod "ls -la $pro_dir/add-ons"
+                '''
+            }
+        }
+    }
+    post {
+        always {
+            deleteDir()
+        }
+    }
+}

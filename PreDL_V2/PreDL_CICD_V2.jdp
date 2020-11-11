@@ -1,0 +1,102 @@
+pipeline {
+    agent any
+    environment {
+        predl_url = "https://pre-dl.dssvti.com"
+        RECIPIENTLIST = 'quang.tong@vtijs.com,hung.phan@vtijs.com'
+        DEVLIST = 'tri.trinh@vtijs.com,bao.tran@vtijs.com'
+    }
+    stages {
+        stage('Checkout Addons HLC13') {
+            steps {
+                script {
+                    last_started = env.STAGE_NAME
+                }
+                build job: '1.CheckoutAddonsHLC13'
+            }
+        }
+        stage('Push Addons To Staging') {
+            steps {
+                script {
+                    last_started = env.STAGE_NAME
+                } 
+                build job: '1.1.PushAddonsToStaging'
+            }
+        }
+        stage('Checkout Odoo Pkg Branch') {
+            steps {
+                script {
+                    last_started = env.STAGE_NAME
+                }
+                build job: '2.CheckoutOdooPkgsBranch_PreDL'
+            }
+        }
+        stage('Push To Staging') {
+            steps {
+                script {
+                    last_started = env.STAGE_NAME
+                } 
+                build job: '2.1.PushToStaging_PreDL'
+            }
+        }
+        stage('Deploy Staging') {
+            steps {
+                script {
+                    last_started = env.STAGE_NAME
+                }
+                build job: '3.DeployStagingPreDL_NEW'
+            }
+        }
+        stage('Checkout Staging') {
+            steps {
+                script {
+                    last_started = env.STAGE_NAME
+                }
+                build job: '4.CheckoutStaging_PreDL'
+            }
+        }
+        stage('Push DSS Staging To Master') {
+            steps {
+                script {
+                    last_started = env.STAGE_NAME
+                }
+                build job: '4.1.PushStagingToMaster_PreDL'
+            }
+        }
+        stage('Deploy Master') {
+            steps {
+                script {
+                    last_started = env.STAGE_NAME
+                }
+                build job: '5.DeployMaster_PreDL_NEW'
+            }
+        }
+        stage('Sync Pre To Prod') {
+            steps {
+                script {
+                    last_started = env.STAGE_NAME
+                }
+                build job: '6.SyncPreToProd'
+            }
+        }
+    }
+    post {
+        always {
+            deleteDir()
+        }
+        failure {
+            script {
+               emailext(to: "$DEVLIST",subject: "PreDL Jenkins Build ${currentBuild.currentResult}: Job ${env.JOB_NAME}",body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}\n At Stage '$last_started'")
+            }
+            //echo 'Failure'
+        }
+        success {
+            script {
+                sh '''#!/bin/bash  
+                datemail=`date +%Y-%m-%d`
+                cd /data/scripts ; python3 cicd_email.py -s "PreDL Jenkins Build $datemail" -b release_note.md
+                '''
+            }
+            //echo 'Success'
+        }
+    }
+}
