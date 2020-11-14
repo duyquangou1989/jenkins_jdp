@@ -1,0 +1,35 @@
+pipeline {
+    agent any
+    environment {
+        infra_script = '/data/scripts/auto_predl'
+    }
+    stages {
+        stage('Verify Infras exist') {
+            steps {
+                sh '''#!/bin/bash
+                    check=$(gcloud compute instances list --project vti-dl | grep predl | grep demo | wc -l)
+                    if test $check -eq 0; 
+                    then
+                        echo "Not need destroy"
+                        exit 1
+                    fi
+                '''
+            }
+        }
+        stage('Start Destroy') {
+            steps {
+                sh 'cd ${infra_script}; terraform destroy -auto-approve'
+            }
+        }
+        stage('Test') {
+            steps {
+                echo 'Test'
+            }
+        }
+    }
+    post {
+        always {
+            deleteDir()
+        }
+    }
+}

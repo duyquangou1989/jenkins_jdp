@@ -2,7 +2,7 @@ pipeline {
     agent any
     environment {
         dl_url="https://dl.dssvti.com"
-        dladdonspath="/tmp/dl-addons13-ex"
+        dladdonspath="/data/dl-addons13"
     }
     stages {
         stage('Re Verify HTTP DL status') {
@@ -26,8 +26,10 @@ pipeline {
         }
         stage('Restart DL') {
             steps {
-                sh 'echo "Restart DL"'
-                sh 'sleep 30'
+                sh '''#!/bin/bash
+                ssh root@10.148.0.25 "systemctl restart odoo"
+                '''
+                sh 'sleep 60'
             }
         }
         stage('Test DL') {
